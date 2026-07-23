@@ -4,6 +4,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 import hmac, json, os
 from .repository import CRM, Conflict, NotFound
+from .followups import Followups
 
 
 def serve():
@@ -12,6 +13,7 @@ def serve():
         raise RuntimeError("Set CRM_API_TOKEN to a secret of at least 24 characters")
     crm = CRM(os.environ.get("CRM_DATABASE", "data/crm.sqlite3"))
     tenant = os.environ.get("CRM_TENANT", "demo")
+    followups = Followups(crm)
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
@@ -39,6 +41,15 @@ def serve():
                     return self.send(
                         200, crm.pipeline(tenant, q.get("property", [""])[0])
                     )
+                if self.command == "GET" and parsed.path == "/followups":
+                    return self.send(
+                        200,
+                        followups.due(
+                            tenant,
+                            q.get("through", [""])[0],
+                            property_id=q.get("property", [None])[0],
+                        ),
+                    )
                 length = int(self.headers.get("Content-Length", "0"))
                 if length < 0 or length > 100_000:
                     raise ValueError("body too large")
@@ -55,6 +66,24 @@ def serve():
                         200,
                         crm.transition(
                             tenant, body["id"], body["stage"], body["version"]
+                        ),
+                    )
+                if self.command == "POST" and parsed.path == "/followups":
+                    return self.send(
+                        201,
+                        followups.create(
+                            tenant, body["lead_id"], body["title"], body["due_at"]
+                        ),
+                    )
+                if self.command == "POST" and parsed.path == "/followups/complete":
+                    return self.send(
+                        200, followups.complete(tenant, body["id"], body["version"])
+                    )
+                if self.command == "POST" and parsed.path == "/followups/reschedule":
+                    return self.send(
+                        200,
+                        followups.reschedule(
+                            tenant, body["id"], body["version"], body["due_at"]
                         ),
                     )
                 self.send(404, {"error": "not found"})
