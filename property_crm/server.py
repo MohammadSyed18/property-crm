@@ -5,6 +5,7 @@ from urllib.parse import urlparse, parse_qs
 import hmac, json, os
 from .repository import CRM, Conflict, NotFound
 from .followups import Followups
+from .tours import Tours
 
 
 def serve():
@@ -14,6 +15,7 @@ def serve():
     crm = CRM(os.environ.get("CRM_DATABASE", "data/crm.sqlite3"))
     tenant = os.environ.get("CRM_TENANT", "demo")
     followups = Followups(crm)
+    tours = Tours(crm)
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
@@ -48,6 +50,16 @@ def serve():
                             tenant,
                             q.get("through", [""])[0],
                             property_id=q.get("property", [None])[0],
+                        ),
+                    )
+                if self.command == "GET" and parsed.path == "/tours":
+                    return self.send(
+                        200,
+                        tours.calendar(
+                            tenant,
+                            q.get("start", [""])[0],
+                            q.get("end", [""])[0],
+                            agent=q.get("agent", [None])[0],
                         ),
                     )
                 length = int(self.headers.get("Content-Length", "0"))
@@ -86,8 +98,40 @@ def serve():
                             tenant, body["id"], body["version"], body["due_at"]
                         ),
                     )
+                if self.command == "POST" and parsed.path == "/tours":
+                    return self.send(
+                        201,
+                        tours.book(
+                            tenant,
+                            body["lead_id"],
+                            body["agent"],
+                            body["start"],
+                            body["end"],
+                            self.headers.get("Idempotency-Key", ""),
+                        ),
+                    )
+                if self.command == "POST" and parsed.path == "/tours/cancel":
+                    return self.send(
+                        200, tours.cancel(tenant, body["id"], body["version"])
+                    )
                 self.send(404, {"error": "not found"})
             except NotFound:
+                if self.command == "POST" and parsed.path == "/tours":
+                    return self.send(
+                        201,
+                        tours.book(
+                            tenant,
+                            body["lead_id"],
+                            body["agent"],
+                            body["start"],
+                            body["end"],
+                            self.headers.get("Idempotency-Key", ""),
+                        ),
+                    )
+                if self.command == "POST" and parsed.path == "/tours/cancel":
+                    return self.send(
+                        200, tours.cancel(tenant, body["id"], body["version"])
+                    )
                 self.send(404, {"error": "not found"})
             except Conflict as error:
                 self.send(409, {"error": str(error)})

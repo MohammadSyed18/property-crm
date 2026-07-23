@@ -28,3 +28,9 @@ Use `CRM.add_property()` and `CRM.add_document()` to populate the database. `GET
 The authenticated API also supports `GET /followups?through=<ISO-time>&property=<id>`, `POST /followups` with `{lead_id,title,due_at}`, `POST /followups/complete` with `{id,version}`, and `POST /followups/reschedule` with `{id,version,due_at}`. Completion retries return the completed task without recording the event twice.
 
 Tests cover tenant isolation, stale versions, completion retries, invalid timestamps, scoped reporting, and safe CSV fields.
+
+## Tour reservations
+
+The authenticated service exposes `POST /tours` with `{lead_id, agent, start, end}` and an `Idempotency-Key` header. `GET /tours?start=...&end=...&agent=...` returns the tenant's booked tours; agent is optional. `POST /tours/cancel` accepts `{id, version}`. Tour windows last 15 minutes to four hours and require timezone-aware timestamps.
+
+`tours.py` reserves the agent, lead, and property exclusively in one SQLite write transaction. Adjacent windows are allowed; overlapping windows conflict. Retries with the same key and content return the existing reservation, while changed content conflicts. Closed leads cannot book. Cancellation checks the version and releases the window; repeating a completed cancellation is safe. Creation and cancellation emit tenant-scoped audit events. Tenant boundaries apply to calendars, leads, cancellation, and request keys. This local system does not send calendar invitations or messages.
